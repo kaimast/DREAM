@@ -88,10 +88,8 @@ def pool_avg(tensor, dim):
 
 def repackage_hidden(h):
     """Wraps hidden states in new Variables, to detach them from their history."""
-    if type(h) == Variable:
-        return Variable(h.data)
-    else:
-        return tuple(repackage_hidden(v) for v in h)
+
+    return torch.tensor(h)
 
 ###################### Summary
 def get_grad_norm(model):

@@ -50,7 +50,7 @@ It runs on [the Instacart dataset](https://www.kaggle.com/c/instacart-market-bas
 
 - tensorboard
 - tensorboardX
-- pytorch == 0.3
+- pytorch >= 1.0
 - pandas ==  0.19.2
 - scikit-learn == 0.18.1
 

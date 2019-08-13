@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+#! /usr/bin/python3
+
 import constants
 from config import Config
 from dream import DreamModel
@@ -58,6 +59,7 @@ def bpr_loss(x, dynamic_user, item_embedding, config):
     for u, du in zip(x, dynamic_user):
         du_p_product = torch.mm(du, item_embedding.t())  # shape: max_len, num_item
         nll_u = []  # nll for user
+
         for t, basket_t in enumerate(u):
             if basket_t[0] != 0 and t != 0:
                 pos_idx = torch.cuda.LongTensor(basket_t) if config.cuda else torch.LongTensor(basket_t)
@@ -69,7 +71,9 @@ def bpr_loss(x, dynamic_user, item_embedding, config):
                 score = du_p_product[t - 1][pos_idx] - du_p_product[t - 1][neg_idx]
                 # Average Negative log likelihood for basket_t
                 nll_u.append(- torch.mean(torch.nn.LogSigmoid()(score)))
-        nll += torch.mean(torch.cat(nll_u))
+
+        nll += torch.mean(torch.stack(nll_u, dim=0))
+
     return nll
 
 
@@ -107,7 +111,7 @@ def train_dream():
         # Logging
         if i % dr_config.log_interval == 0 and i > 0:
             elapsed = (time() - start_time) * 1000 / dr_config.log_interval
-            cur_loss = total_loss[0] / dr_config.log_interval / dr_config.batch_size  # turn tensor into float
+            cur_loss = total_loss.item() / dr_config.log_interval / dr_config.batch_size  # turn tensor into float
             total_loss = 0
             start_time = time()
             print(
@@ -264,6 +268,7 @@ best_val_loss = None
 try:
     for k,v in constants.DREAM_CONFIG.items():
         print(k,v)
+
     # training
     for epoch in range(dr_config.epochs):
         if constants.REORDER:
@@ -287,4 +292,4 @@ try:
             pass
 except KeyboardInterrupt:
     print('*' * 89)
-    print('Early Stopping!')
+    print('Got keyboard Interrupt and stopped early')
