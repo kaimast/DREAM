@@ -1,0 +1,5 @@
+*.pyc
+*.swp
+src/tmp
+src/models
+src/runs

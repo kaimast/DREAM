@@ -1,9 +1,12 @@
+import os
+
 GPUS = "0,1,2,3"
 REORDER = False
 RAW_DATA_DIR = './tmp/raw/'
 FEAT_DATA_DIR = './tmp/feat/'
 DREAM_MODEL_DIR = './tmp/dream/'
 
+# Default confiugration
 DREAM_CONFIG = {'basket_pool_type': 'max', # 'avg'
                 'rnn_layers': 2,  # 2, 3
                 'rnn_type': 'RNN_RELU',  #'RNN_TANH',#'GRU',#'LSTM',# 'RNN_RELU',
@@ -19,5 +22,5 @@ DREAM_CONFIG = {'basket_pool_type': 'max', # 'avg'
                 'batch_size': 32,
                 'learning_rate': 0.001, # 0.0001
                 'log_interval': 1, # num of batchs between two logging
-                'checkpoint_dir': DREAM_MODEL_DIR + '\dream-{epoch:02d}-{loss:.4f}.model',
+                'checkpoint_dir': DREAM_MODEL_DIR + 'dream-{epoch:02d}-{loss:.4f}.model',
                 }

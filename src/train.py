@@ -5,6 +5,7 @@ from config import Config
 from dream import DreamModel
 from data import Dataset, BasketConstructor
 from utils import batchify, repackage_hidden, get_grad_norm, get_ratio_update, get_weight_update
+import torch_tvm
 
 import os
 import pdb
@@ -173,7 +174,7 @@ def train_reorder_dream():
         # Logging
         if i % dr_config.log_interval == 0 and i > 0:
             elapsed = (time() - start_time) * 1000 / dr_config.log_interval
-            cur_loss = total_loss[0] / dr_config.log_interval / dr_config.batch_size # turn tensor into float
+            cur_loss = total_loss.item() / dr_config.log_interval / dr_config.batch_size # turn tensor into float
             total_loss = 0
             start_time = time()
             print(
@@ -199,7 +200,7 @@ def evaluate_dream():
 
     # Logging
     elapsed = (time() - start_time) * 1000 / num_batchs
-    total_loss = total_loss[0] / num_batchs / dr_config.batch_size
+    total_loss = total_loss.item() / num_batchs / dr_config.batch_size
     writer.add_scalar('model/eval_loss', total_loss, (epoch + 1) * num_batchs)
     writer.add_scalar('model/eval_loss', total_loss, (epoch + 1) * num_batchs)
     print('[Evaluation]| Epochs {:3d} | Elapsed {:02.2f} | Loss {:05.2f} |'.format(epoch, elapsed, total_loss))
@@ -223,73 +224,84 @@ def evaluate_reorder_dream():
 
     # Logging
     elapsed = (time() - start_time) * 1000 / num_batchs
-    total_loss = total_loss[0] / num_batchs / dr_config.batch_size
+    total_loss = total_loss.item() / num_batchs / dr_config.batch_size
     print('[Evaluation]| Epochs {:3d} | Elapsed {:02.2f} | Loss {:05.2f} |'.format(epoch, elapsed, total_loss))
     return total_loss
 
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = constants.GPUS
+def main():
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = constants.GPUS
 
-# Prepare input
-bc = BasketConstructor(constants.RAW_DATA_DIR, constants.FEAT_DATA_DIR)
-# Users' baskets
-ub_basket = bc.get_baskets('prior', reconstruct=False)
+    torch_tvm.enable(
+        opt_level=3,
+        device_type="gpu",
+        device="cuda",
+        host="llvm")
 
-if constants.REORDER:
-    # Users' reordered baskets
-    ub_rbks = bc.get_baskets('prior', reconstruct=False, reordered=True)
-    # User's item history
-    ub_ihis = bc.get_item_history('prior', reconstruct=False)
-    # Train test split
-    train_ub, test_ub, train_rbks, test_rbks, train_ihis, test_ihis = train_test_split(ub_basket, ub_rbks, ub_ihis, test_size=0.2)
-    del ub_basket, ub_rbks, ub_ihis  # memory saving
-    train_ub, test_ub = Dataset(train_ub, train_rbks, train_ihis), Dataset(test_ub, test_rbks, test_ihis)
-    del train_rbks, test_rbks, train_ihis, test_ihis # memory saving
-else:
-    train_ub, test_ub = train_test_split(ub_basket, test_size=0.2)
-    del ub_basket
-    train_ub, test_ub = Dataset(train_ub), Dataset(test_ub)
+    # Prepare input
+    bc = BasketConstructor(constants.RAW_DATA_DIR, constants.FEAT_DATA_DIR)
+    # Users' baskets
+    ub_basket = bc.get_baskets('prior', reconstruct=False)
 
-# Model config
-dr_config = Config(constants.DREAM_CONFIG)
-dr_model = DreamModel(dr_config)
-if dr_config.cuda:
-    dr_model.cuda()
+    if constants.REORDER:
+        # Users' reordered baskets
+        ub_rbks = bc.get_baskets('prior', reconstruct=False, reordered=True)
+        # User's item history
+        ub_ihis = bc.get_item_history('prior', reconstruct=False)
+        # Train test split
+        train_ub, test_ub, train_rbks, test_rbks, train_ihis, test_ihis = train_test_split(ub_basket, ub_rbks, ub_ihis, test_size=0.2)
+        del ub_basket, ub_rbks, ub_ihis  # memory saving
+        train_ub, test_ub = Dataset(train_ub, train_rbks, train_ihis), Dataset(test_ub, test_rbks, test_ihis)
+        del train_rbks, test_rbks, train_ihis, test_ihis # memory saving
+    else:
+        train_ub, test_ub = train_test_split(ub_basket, test_size=0.2)
+        del ub_basket
+        train_ub, test_ub = Dataset(train_ub), Dataset(test_ub)
 
-# Optimizer
-optim = torch.optim.Adam(dr_model.parameters(), lr = dr_config.learning_rate)
-# optim = torch.optim.Adadelta(dr_model.parameters())
-# optim = torch.optim.SGD(dr_model.parameters(), lr=dr_config.learning_rate, momentum=0.9)
-writer = SummaryWriter(log_dir='runs/{}'.format(dr_config.alias))  # tensorboard writer
-writer.add_text('config', str(dr_config))
-best_val_loss = None
+    # Model config
+    dr_config = Config(constants.DREAM_CONFIG)
+    dr_model = DreamModel(dr_config)
+    if dr_config.cuda:
+        dr_model.cuda()
 
-try:
-    for k,v in constants.DREAM_CONFIG.items():
-        print(k,v)
+    # Optimizer
+    optim = torch.optim.Adam(dr_model.parameters(), lr = dr_config.learning_rate)
+    # optim = torch.optim.Adadelta(dr_model.parameters())
+    # optim = torch.optim.SGD(dr_model.parameters(), lr=dr_config.learning_rate, momentum=0.9)
+    writer = SummaryWriter(log_dir='runs/{}'.format(dr_config.alias))  # tensorboard writer
+    writer.add_text('config', str(dr_config))
+    best_val_loss = None
 
-    # training
-    for epoch in range(dr_config.epochs):
-        if constants.REORDER:
-            train_reorder_dream()
-        else:
-            train_dream()
-        print('-' * 89)
-        if constants.REORDER:
-            val_loss = evaluate_reorder_dream()
-        else:
-            val_loss = evaluate_dream()
-        print('-' * 89)
-        # checkpoint
-        if not best_val_loss or val_loss < best_val_loss:
-            with open(dr_config.checkpoint_dir.format(epoch = epoch, loss = val_loss), 'wb') as f:
-                torch.save(dr_model, f)
-            best_val_loss = val_loss
-        else:
-            # Manual SGD slow down lr if no improvement in val_loss
-            # dr_config.learning_rate = dr_config.learning_rate / 4
-            pass
-except KeyboardInterrupt:
-    print('*' * 89)
-    print('Got keyboard Interrupt and stopped early')
+    try:
+        for k,v in constants.DREAM_CONFIG.items():
+            print(k,v)
+
+        # training
+        for epoch in range(dr_config.epochs):
+            if constants.REORDER:
+                train_reorder_dream()
+            else:
+                train_dream()
+            print('-' * 89)
+            if constants.REORDER:
+                val_loss = evaluate_reorder_dream()
+            else:
+                val_loss = evaluate_dream()
+            print('-' * 89)
+            # checkpoint
+            if not best_val_loss or val_loss < best_val_loss:
+                with open(dr_config.checkpoint_dir.format(epoch = epoch, loss = val_loss), 'wb') as f:
+                    torch.save(dr_model, f)
+                best_val_loss = val_loss
+            else:
+                # Manual SGD slow down lr if no improvement in val_loss
+                # dr_config.learning_rate = dr_config.learning_rate / 4
+                pass
+
+    except KeyboardInterrupt:
+        print('*' * 89)
+        print('Got keyboard Interrupt and stopped early')
+
+if __name__ == '__main__': main()
+

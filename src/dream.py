@@ -25,7 +25,7 @@ class DreamModel(torch.nn.Module):
         super(DreamModel, self).__init__()
         # Model configuration
         self.config = config
-        # Layer definitons
+        # Layer definitions
         self.encode = torch.nn.Embedding(config.num_product, 
                                          config.embedding_dim,
                                          padding_idx = 0) # Item embedding layer, 商品编码
@@ -45,26 +45,40 @@ class DreamModel(torch.nn.Module):
                                     nonlinearity=nonlinearity, 
                                     batch_first=True, 
                                     dropout=config.dropout)
-    
-    def forward(self, x, lengths, hidden):
-        # Basket Encoding 
+
+    # Embed all baskets of a single user
+    def embed_baskets(self, baskets):
+        embed_baskets = []
+
+        for basket in baskets:
+            basket = torch.LongTensor(basket).resize_(1, len(basket))
+            basket = basket.cuda() if self.config.cuda else basket # use cuda for acceleration
+            basket = self.encode(torch.autograd.Variable(basket)) # shape: 1, len(basket), embedding_dim
+            embed_baskets.append(self.pool(basket, dim=1))
+
+        return embed_baskets
+
+
+    def embed(self, users, lengths):
         ub_seqs = [] # users' basket sequence
-        for user in x: # x shape (batch of user, time_step, indice of product) nested lists
-            embed_baskets = []
-            for basket in user:
-                basket = torch.LongTensor(basket).resize_(1, len(basket))
-                basket = basket.cuda() if self.config.cuda else basket # use cuda for acceleration
-                basket = self.encode(torch.autograd.Variable(basket)) # shape: 1, len(basket), embedding_dim
-                embed_baskets.append(self.pool(basket, dim=1))
+
+        for user in users:
+            baskets = self.embed_baskets(user)
+
             # concat current user's all baskets and append it to users' basket sequence
-            ub_seqs.append(torch.cat(embed_baskets, 0).unsqueeze(0))  # shape: 1, num_basket, embedding_dim
+            ub_seqs.append(torch.cat(baskets, 0).unsqueeze(0))  # shape: 1, num_basket, embedding_dim
+
         # Input for rnn 
         ub_seqs = torch.cat(ub_seqs, 0).cuda() if self.config.cuda else torch.cat(ub_seqs, 0) # shape: batch_size, max_len, embedding_dim
-        packed_ub_seqs = torch.nn.utils.rnn.pack_padded_sequence(ub_seqs, lengths, batch_first=True) # packed sequence as required by pytorch
         
-        # RNN
+        return torch.nn.utils.rnn.pack_padded_sequence(ub_seqs, lengths, batch_first=True) # packed sequence as required by pytorch
+
+    def forward(self, x, lengths, hidden):
+        packed_ub_seqs = self.embed(x, lengths)
+        
         output, h_u = self.rnn(packed_ub_seqs, hidden)
-        dynamic_user, _ = torch.nn.utils.rnn.pad_packed_sequence(output, batch_first=True) # shape: batch_size, max_len, embedding_dim
+        dynamic_user, _ = torch.nn.utils.rnn.pad_packed_sequence(output, batch_first=True)
+
         return dynamic_user, h_u
         
     def init_weight(self):
